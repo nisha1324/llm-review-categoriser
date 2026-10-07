@@ -7,6 +7,7 @@ from reviewcat import baseline, llm
 from reviewcat.taxonomy import THEME_NAMES
 from prepare_data import clean
 from analyse_themes import theme_table
+from evaluate import ROOT, confusion, per_theme_scores
 
 
 def test_baseline_picks_specific_themes():
@@ -69,3 +70,23 @@ def test_theme_table_rates():
     t = theme_table(df)
     assert t.loc["x", "negative_rate_pct"] == 50.0
     assert t.loc["y", "share_of_all_negatives_pct"] == 50.0
+
+
+def test_evaluation_scores_and_confusion():
+    merged = pd.DataFrame({
+        "gold_theme": ["battery_power", "battery_power", "value_price", "general_sentiment"],
+        "theme":      ["battery_power", "general_sentiment", "value_price", "value_price"],
+    })
+    s = per_theme_scores(merged).set_index("theme")
+    assert s.loc["battery_power", ["precision", "recall"]].tolist() == [1.0, 0.5]
+    assert s.loc["value_price", ["precision", "recall"]].tolist() == [0.5, 1.0]
+    assert s.loc["fit_comfort", "f1"] == 0.0
+    cm = confusion(merged)
+    assert cm.shape == (9, 9) and cm.values.sum() == 4
+    assert cm.loc["battery_power", "general_sentiment"] == 1
+
+
+def test_gold_labels_are_valid():
+    gold = pd.read_csv(ROOT / "data" / "gold" / "gold_labels.csv")
+    assert len(gold) == 150 and gold.review_id.is_unique
+    assert set(gold.gold_theme) <= set(THEME_NAMES)
