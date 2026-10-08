@@ -8,6 +8,8 @@ from reviewcat.taxonomy import THEME_NAMES
 from prepare_data import clean
 from analyse_themes import theme_table
 from evaluate import ROOT, confusion, per_theme_scores
+from drilldown import assign, sub_table
+from reviewcat.subissues import OTHER, describes_failure, sub_issue
 
 
 def test_baseline_picks_specific_themes():
@@ -90,3 +92,38 @@ def test_gold_labels_are_valid():
     gold = pd.read_csv(ROOT / "data" / "gold" / "gold_labels.csv")
     assert len(gold) == 150 and gold.review_id.is_unique
     assert set(gold.gold_theme) <= set(THEME_NAMES)
+
+
+def test_sub_issue_rules_split_themes():
+    assert sub_issue("battery_power", "The battery runs down quickly.") == "short_battery_life"
+    assert sub_issue("battery_power", "I bought two of them and neither will charge.") == "charger_fails_or_slow"
+    # battery-life wording wins over the word 'charger'
+    assert sub_issue("battery_power", "Tied to charger for calls over 45 minutes.") == "short_battery_life"
+    assert sub_issue("audio_call_quality", "Mic Doesn't work.") == "caller_cant_hear_me"
+    assert sub_issue("build_durability", "They work about 2 weeks then break.") == "failed_after_short_use"
+    assert sub_issue("service_delivery", "Can't store anything but numbers.") == OTHER
+    assert sub_issue("fit_comfort", "Too tight.") == OTHER  # theme without rules
+
+
+def test_describes_failure():
+    assert describes_failure("Doesn't Work.")
+    assert describes_failure("All three broke within two months of use.")
+    assert not describes_failure("It always cuts out and says signal failed.")
+    assert not describes_failure("The battery runs down quickly.")
+
+
+def test_sub_table_shares_add_up_per_theme():
+    df = pd.DataFrame({
+        "review_id": ["r1", "r2", "r3", "r4", "r5"],
+        "text": ["Battery has no life.", "The charger did not work.", "Bad.", "Great!",
+                 "Reception is terrible."],
+        "sentiment": ["negative", "negative", "negative", "negative", "positive"],
+        "theme": ["battery_power", "battery_power", "battery_power", "general_sentiment",
+                  "audio_call_quality"],
+    })
+    sub = assign(df)
+    assert len(sub) == 3  # positives and themes without rules are left out
+    t = sub_table(sub)
+    shares = t.groupby("theme", observed=True)["share_of_theme_negatives_pct"].sum()
+    assert ((shares - 100).abs() <= 0.2).all()  # rounding to 1 dp
+    assert t["sub_issue"].iloc[-1] == OTHER  # 'other' listed last in its theme
