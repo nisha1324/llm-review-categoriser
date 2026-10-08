@@ -1,6 +1,6 @@
 # LLM review categoriser
 
-> 🚧 **In progress.** Done so far: data, theme taxonomy, offline baseline, Claude backend (mock-tested), a first theme analysis, and an accuracy check against a hand-labelled gold sample.
+> 🚧 **In progress.** Done so far: data, theme taxonomy, offline baseline, Claude backend (mock-tested), a first theme analysis, an accuracy check against a hand-labelled gold sample, and a sub-issue drill-down of the negative themes.
 
 **Business question:** a product team gets hundreds of short reviews. Which *themes* (battery, call quality, durability, delivery…) drive the negative ones, so the team knows what to fix first?
 
@@ -69,6 +69,31 @@ Labelling 150 reviews by hand is cheap, and without it nobody knows whether to t
 
 These are the cases where meaning matters more than words, which is exactly what an LLM should handle better. The same script will score the Claude backend once a key is available (`python scripts/evaluate.py --backend llm`).
 
+## What goes wrong inside each theme?
+"Battery" isn't something a team can fix. "The charger doesn't work" is. `scripts/drilldown.py` splits the negative reviews of the four most-complained-about themes into sub-issues using ordered rules (`reviewcat/subissues.py`, first match wins). Reviews that match no rule are counted as `other_unclear` instead of being forced into a bucket.
+
+![Sub-issues per theme](results/charts/subissues_baseline.png)
+
+| Theme (negatives) | Top sub-issues |
+|---|---|
+| audio_call_quality (70) | reception / dropped calls 14 (20.0%), too quiet to hear the caller 13 (18.6%), caller can't hear me 10 (14.3%), noise / echo / sound leak 10 (14.3%), poor sound in general 10 (14.3%), missed incoming calls 4 (5.7%), unclear 9 (12.9%) |
+| battery_power (48) | short battery life 19 (39.6%), **charger doesn't work or is slow 17 (35.4%)**, battery poor or faulty (no detail) 10 (20.8%), unclear 2 |
+| build_durability (44) | vague "poor quality / junk" 17 (38.6%), **failed after days to months 14 (31.8%)**, broke or cracked 7 (15.9%), cheap materials 6 (13.6%) |
+| service_delivery (32) | customer support 11 (34.4%), mobile carrier (Verizon, Sprint…) 7 (21.9%), returns / refunds / warranty 7 (21.9%), retailer or listing 4 (12.5%), unclear 3 |
+
+Example quotes for every sub-issue: [`results/drilldown_baseline.md`](results/drilldown_baseline.md). Every single assignment, for auditing: [`results/subissues_baseline.csv`](results/subissues_baseline.csv).
+
+**Products that simply don't work.** Across *all* themes, 46 of 497 negative reviews (9.3%) say the product doesn't work, broke or died ("Doesn't Work.", "Lasted one day and then blew up."). Only 13 of them were routed to `build_durability`. 13 sit in `general_sentiment`, 12 in `battery_power` (mostly chargers) and 7 in `audio_call_quality`. So a theme view alone hides how big the "dead on arrival or soon after" problem is.
+
+**What this means for the business:**
+- **Chargers are a quick win.** A charger is the simplest accessory in the range, yet charger faults are almost as common as short battery life (17 vs 19 reviews). Several are compatibility mismatches ("does not charge the Cingular 8525", "not a match between the phone and the charger"), which a clearer compatibility list on the listing could prevent.
+- **Durability is a failure-rate problem, not a looks problem.** Where reviewers are specific, most describe the product failing after a short time in use (14) or breaking (7). That points to supplier quality checks and warranty data, not redesign.
+- **Audio has no single fix.** Complaints split evenly between reception, volume, microphone and noise. Hearing problems in either direction (too quiet, or the caller can't hear me) are the biggest group (23 of 70, 32.9%). Reception complaints (20%) partly depend on the carrier's network, which the brand doesn't control.
+- **Over a fifth of "service" complaints are about the carrier**, not the seller (7 of 32). Those should be reported separately so the seller's own support score isn't blamed for them.
+- **Many complaints carry no detail** (38.6% of durability, 20.8% of battery). Asking for a structured reason at return time ("stopped working / broke / didn't fit / not compatible") would turn these into usable data.
+
+**Caveats:** these use the keyword baseline's theme labels (63.3% accurate), so some reviews start in the wrong theme. Most `other_unclear` reviews are exactly those (e.g. "Over charge shipping" sits under battery). The rules were written after reading these same reviews, so there's no held-out check, and the counts are small. Treat the shares as a ranking of what to look at first, not as precise rates.
+
 ## How to run
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -78,10 +103,11 @@ python scripts/prepare_data.py
 python scripts/run_categoriser.py          # auto: Claude if ANTHROPIC_API_KEY is set, else baseline
 python scripts/analyse_themes.py --backend baseline
 python scripts/evaluate.py --backend baseline   # accuracy vs the gold sample
+python scripts/drilldown.py --backend baseline  # sub-issues inside the negative themes
 pytest                                     # offline tests; the LLM client is mocked
 ```
 To use Claude, copy `.env.example` to `.env` and add your `ANTHROPIC_API_KEY`. Then run `run_categoriser.py --backend llm` and `analyse_themes.py --backend llm`.
 
 ## Next steps
 - Score the Claude backend on the gold sample once an API key is available.
-- Break down the negative reviews within each theme (what exactly goes wrong) and write ranked recommendations.
+- Ranked recommendations and limitations.
